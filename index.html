@@ -100,14 +100,12 @@
       <div class="field"><input type="range" id="volume" class="live" min="0" max="100" step="5"><span id="volLabel" style="width:3em"></span></div></div>
     <div class="tests">
       <button class="sec live" data-ev="count">残り3秒</button>
-      <button class="sec live" data-ev="work">ワークアウト開始</button>
-      <button class="sec live" data-ev="rest">休憩開始</button>
-      <button class="sec live" data-ev="done">全終了</button>
+      <button class="sec live" data-ev="work">開始・終了の音</button>
     </div>
     <label class="check"><input type="checkbox" id="mute" class="live"> 音を消す</label>
     <div class="total" id="total"></div>
     <div class="legend">
-      どの種類も1回だけ鳴ります。残り3・2・1秒は短い音、ワークアウト開始は高い音、休憩開始は低い音、全終了は一番長い音です。
+      どの種類も1回だけ鳴ります。残り3・2・1秒は短い音、ワークアウト開始・休憩開始・全終了は同じ音です。
       上のボタンで試し聞きできます。声が大きい場所では、音量を最大にして端末側の音量も上げてください。
     </div>
   </section>
@@ -231,9 +229,10 @@
   const sounds = {
     count: () => SETS[settings.soundSet].count(),
     work:  () => SETS[settings.soundSet].work(),
-    rest:  () => SETS[settings.soundSet].rest(),
+    // 開始・休憩・終了はすべてワークアウト開始と同じ音
+    rest:  () => SETS[settings.soundSet].work(),
     prep:  () => SETS[settings.soundSet].count(),
-    done:  () => SETS[settings.soundSet].done(),
+    done:  () => SETS[settings.soundSet].work(),
   };
 
   // ---------- タイマー本体 ----------
