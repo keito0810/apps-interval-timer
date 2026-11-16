@@ -2,7 +2,11 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="タイマー">
+<meta name="theme-color" content="#f4f2ee">
 <title>インターバルタイマー</title>
 <style>
   :root {
@@ -14,6 +18,8 @@
       --prep:#e0b93a; --work:#ef6b62; --rest:#6db2e6; --done:#6fc283; }
   }
   * { box-sizing: border-box; }
+  html { overflow-x:hidden; overscroll-behavior-x:none; -webkit-text-size-adjust:100%; }
+  body { overflow-x:hidden; touch-action:pan-y; width:100%; }
   body { margin:0; background:var(--bg); color:var(--fg);
     font-family:"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif; min-height:100vh; }
   main { max-width:560px; margin:0 auto; padding:16px; }
@@ -53,8 +59,13 @@
   .total { color:var(--sub); font-size:14px; margin-top:8px; }
   .check { display:flex; align-items:center; gap:8px; padding:10px 0; font-size:15px; }
   .check input { width:20px; height:20px; }
-  select { font:inherit; font-size:16px; padding:8px; background:var(--bg); color:var(--fg); border:1px solid var(--line); }
-  input[type=range] { width:140px; }
+  select { font:inherit; font-size:16px; padding:8px; background:var(--bg); color:var(--fg); border:1px solid var(--line);
+    width:100%; max-width:100%; min-width:0; text-overflow:ellipsis; }
+  input[type=range] { flex:1; min-width:0; width:100%; margin:0; }
+  .row label { min-width:0; }
+  .row.stack { flex-direction:column; align-items:stretch; gap:8px; }
+  .row.stack .field { width:100%; }
+  .row.stack .field span { text-align:right; }
   .tests { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:8px 0; }
   .tests button { font-size:15px; padding:10px; }
   .legend { color:var(--sub); font-size:13px; line-height:1.7; margin-top:12px; }
@@ -94,9 +105,9 @@
       <input type="number" id="rounds" min="1" max="99"><button class="step sec" data-d="1" data-t="rounds">+</button><span>回</span></div></div>
     <label class="check"><input type="checkbox" id="skipLastRest"> 最後のラウンドの休憩を省く</label>
     <h2>音</h2>
-    <div class="row"><label for="soundSet">音の種類</label>
+    <div class="row stack"><label for="soundSet">音の種類</label>
       <select id="soundSet" class="live"></select></div>
-    <div class="row"><label for="volume">音量</label>
+    <div class="row stack"><label for="volume">音量</label>
       <div class="field"><input type="range" id="volume" class="live" min="0" max="100" step="5"><span id="volLabel" style="width:3em"></span></div></div>
     <div class="tests">
       <button class="sec live" data-ev="count">残り3秒</button>
@@ -204,22 +215,22 @@
     freqs.forEach((f, i) => tone(f, start + i * (len + gap), len, vol, 'square'));
   }
   const SETS = {
-    horn: { label: 'ブザー（体育館のホーン風・太く大きい）',
+    horn: { label: 'ブザー',
       count: () => tone(1000, 0, 0.18, 0.85, 'sawtooth'),
       work:  () => { tone(1100, 0, 0.7, 0.85, 'sawtooth'); tone(1108, 0, 0.7, 0.85, 'sawtooth'); },
       rest:  () => { tone(440, 0, 0.7, 0.9, 'sawtooth'); tone(446, 0, 0.7, 0.9, 'sawtooth'); },
       done:  () => { tone(1400, 0, 1.8, 0.9, 'sawtooth'); tone(1410, 0, 1.8, 0.9, 'sawtooth'); } },
-    whistle: { label: 'ホイッスル（高くて鋭い・声を突き抜ける）',
+    whistle: { label: 'ホイッスル',
       count: () => tone(2600, 0, 0.14, 0.9, 'triangle'),
       work:  () => tone(3000, 0, 0.7, 0.9, 'triangle', { vib: 28, depth: 120 }),
       rest:  () => tone(1900, 0, 0.7, 0.9, 'triangle', { vib: 22, depth: 80 }),
       done:  () => tone(3400, 0, 1.8, 0.9, 'triangle', { vib: 30, depth: 140 }) },
-    alarm: { label: '電子アラーム（ピピピ・連続音）',
+    alarm: { label: '電子アラーム',
       count: () => tone(2400, 0, 0.12, 0.8, 'square'),
       work:  () => tone(2600, 0, 0.6, 0.8, 'square'),
       rest:  () => tone(1000, 0, 0.6, 0.85, 'square'),
       done:  () => tone(2000, 0, 1.6, 0.8, 'square') },
-    gong: { label: 'ゴング・ベル（金属音・余韻あり）',
+    gong: { label: 'ゴング・ベル',
       count: () => bell(1500, 0, 0.35, 0.8),
       work:  () => bell(1100, 0, 1.2, 0.9),
       rest:  () => bell(500, 0, 1.8, 1.0),
