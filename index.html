@@ -53,6 +53,10 @@
   .total { color:var(--sub); font-size:14px; margin-top:8px; }
   .check { display:flex; align-items:center; gap:8px; padding:10px 0; font-size:15px; }
   .check input { width:20px; height:20px; }
+  select { font:inherit; font-size:16px; padding:8px; background:var(--bg); color:var(--fg); border:1px solid var(--line); }
+  input[type=range] { width:140px; }
+  .tests { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:8px 0; }
+  .tests button { font-size:15px; padding:10px; }
   .legend { color:var(--sub); font-size:13px; line-height:1.7; margin-top:12px; }
 </style>
 </head>
@@ -89,11 +93,22 @@
       <div class="field"><button class="step sec" data-d="-1" data-t="rounds">−</button>
       <input type="number" id="rounds" min="1" max="99"><button class="step sec" data-d="1" data-t="rounds">+</button><span>回</span></div></div>
     <label class="check"><input type="checkbox" id="skipLastRest"> 最後のラウンドの休憩を省く</label>
-    <label class="check"><input type="checkbox" id="mute"> 音を消す</label>
+    <h2>音</h2>
+    <div class="row"><label for="soundSet">音の種類</label>
+      <select id="soundSet" class="live"></select></div>
+    <div class="row"><label for="volume">音量</label>
+      <div class="field"><input type="range" id="volume" class="live" min="0" max="100" step="5"><span id="volLabel" style="width:3em"></span></div></div>
+    <div class="tests">
+      <button class="sec live" data-ev="count">残り3秒</button>
+      <button class="sec live" data-ev="work">ワークアウト開始</button>
+      <button class="sec live" data-ev="rest">休憩開始</button>
+      <button class="sec live" data-ev="done">全終了</button>
+    </div>
+    <label class="check"><input type="checkbox" id="mute" class="live"> 音を消す</label>
     <div class="total" id="total"></div>
     <div class="legend">
-      音の違い: カウントダウン（残り3・2・1秒）は短いピッ。ワークアウト開始は高音の2連音、休憩開始は低音の1回、
-      全終了は上昇する3音＋長い音。
+      どの種類も、残り3・2・1秒は短い音、ワークアウト開始は高い音、休憩開始は低い音、全終了は上昇する音＋長い音です。
+      上のボタンで試し聞きできます。声が大きい場所では、音量を最大にして端末側の音量も上げてください。
     </div>
   </section>
 </main>
@@ -102,7 +117,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const KEY = 'interval-timer-settings-v1';
-  const DEFAULTS = { prep: 10, work: 30, rest: 10, rounds: 8, skipLastRest: true, mute: false };
+  const DEFAULTS = { prep: 10, work: 30, rest: 10, rounds: 8, skipLastRest: true, mute: false, soundSet: 'horn', volume: 100 };
   const inputs = ['prep', 'work', 'rest', 'rounds'];
 
   // ---------- 設定 ----------
@@ -117,12 +132,18 @@
     settings.rounds = clamp($('rounds').value, 1, 99);
     settings.skipLastRest = $('skipLastRest').checked;
     settings.mute = $('mute').checked;
+    settings.soundSet = SETS[$('soundSet').value] ? $('soundSet').value : 'horn';
+    settings.volume = clamp($('volume').value, 0, 100);
+    if (master) master.gain.value = settings.volume / 100 * 1.5;
+    $('volLabel').textContent = settings.volume + '%';
     try { localStorage.setItem(KEY, JSON.stringify(settings)); } catch (e) {}
   }
   function writeSettings() {
     inputs.forEach(k => $(k).value = settings[k]);
     $('skipLastRest').checked = settings.skipLastRest;
     $('mute').checked = settings.mute;
+    $('soundSet').value = settings.soundSet;
+    $('volume').value = settings.volume;
   }
   const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 
@@ -142,28 +163,77 @@
   }
 
   // ---------- 音 ----------
-  let ctx = null;
+  // 声（300〜3000Hz）に埋もれないよう、倍音の多い波形(のこぎり波・矩形波)と
+  // 声より高い2〜3kHz帯を使い、コンプレッサーで音量を詰めて最大限大きくしている。
+  let ctx = null, master = null;
   function ensureAudio() {
-    if (!ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) ctx = new AC(); }
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        ctx = new AC();
+        const comp = ctx.createDynamicsCompressor();
+        comp.threshold.value = -10; comp.knee.value = 0; comp.ratio.value = 20;
+        comp.attack.value = 0.002; comp.release.value = 0.08;
+        master = ctx.createGain();
+        master.gain.value = settings.volume / 100 * 1.5;
+        master.connect(comp); comp.connect(ctx.destination);
+      }
+    }
     if (ctx && ctx.state === 'suspended') ctx.resume();
   }
-  function tone(freq, start, dur, vol = 0.35, type = 'sine') {
+  function tone(freq, start, dur, vol = 0.8, type = 'square', o = {}) {
     if (!ctx || settings.mute) return;
     const t0 = ctx.currentTime + start;
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = type; o.frequency.value = freq;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, t0);
+    if (o.to) osc.frequency.linearRampToValueAtTime(o.to, t0 + dur);
+    if (o.vib) {
+      const l = ctx.createOscillator(), lg = ctx.createGain();
+      l.frequency.value = o.vib; lg.gain.value = o.depth || 100;
+      l.connect(lg).connect(osc.frequency); l.start(t0); l.stop(t0 + dur + 0.05);
+    }
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(g).connect(ctx.destination);
-    o.start(t0); o.stop(t0 + dur + 0.02);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+    if (o.decay) g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    else { g.gain.setValueAtTime(vol, t0 + Math.max(0.006, dur - 0.03)); g.gain.linearRampToValueAtTime(0.0001, t0 + dur); }
+    osc.connect(g).connect(master);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
   }
+  function bell(base, start, dur, vol) {
+    [1, 2.76, 5.4, 8.93].forEach((r, i) => tone(base * r, start, dur / (1 + i * 0.5), vol / (1 + i * 0.5), 'sine', { decay: true }));
+  }
+  function pulses(freqs, start, len, gap, vol) {
+    freqs.forEach((f, i) => tone(f, start + i * (len + gap), len, vol, 'square'));
+  }
+  const SETS = {
+    horn: { label: 'ブザー（体育館のホーン風・太く大きい）',
+      count: () => tone(1000, 0, 0.18, 0.85, 'sawtooth'),
+      work:  () => { [0, 0.45].forEach((s, i) => { const d = i ? 0.8 : 0.3; tone(1100, s, d, 0.85, 'sawtooth'); tone(1108, s, d, 0.85, 'sawtooth'); }); },
+      rest:  () => { tone(440, 0, 1.1, 0.9, 'sawtooth'); tone(446, 0, 1.1, 0.9, 'sawtooth'); },
+      done:  () => { [700, 900].forEach((f, i) => tone(f, i * 0.3, 0.25, 0.85, 'sawtooth')); tone(1100, 0.6, 1.6, 0.9, 'sawtooth'); tone(1108, 0.6, 1.6, 0.9, 'sawtooth'); } },
+    whistle: { label: 'ホイッスル（高くて鋭い・声を突き抜ける）',
+      count: () => tone(2600, 0, 0.14, 0.9, 'triangle'),
+      work:  () => { tone(2800, 0, 0.25, 0.9, 'triangle', { vib: 28, depth: 120 }); tone(3000, 0.35, 0.8, 0.9, 'triangle', { vib: 28, depth: 120 }); },
+      rest:  () => tone(2300, 0, 1.0, 0.9, 'triangle', { to: 1500, vib: 22, depth: 80 }),
+      done:  () => { [2400, 2800, 3200].forEach((f, i) => tone(f, i * 0.3, 0.25, 0.9, 'triangle', { vib: 28, depth: 100 })); tone(3400, 0.95, 1.5, 0.9, 'triangle', { vib: 30, depth: 140 }); } },
+    alarm: { label: '電子アラーム（ピピピ・連続音）',
+      count: () => tone(2400, 0, 0.12, 0.8, 'square'),
+      work:  () => pulses([2000, 2600, 2000, 2600, 2000, 2600], 0, 0.07, 0.03, 0.8),
+      rest:  () => pulses([1000, 1000, 1000], 0, 0.22, 0.1, 0.85),
+      done:  () => { pulses([1500, 1900, 2300, 2700], 0, 0.15, 0.05, 0.8); tone(2700, 0.85, 1.4, 0.8, 'square', { vib: 12, depth: 300 }); } },
+    gong: { label: 'ゴング・ベル（金属音・余韻あり）',
+      count: () => bell(1500, 0, 0.35, 0.8),
+      work:  () => { bell(1100, 0, 1.0, 0.9); bell(1100, 0.4, 1.4, 0.9); },
+      rest:  () => bell(500, 0, 2.0, 1.0),
+      done:  () => { [700, 900, 1100].forEach((f, i) => bell(f, i * 0.35, 1.2, 0.9)); bell(1400, 1.1, 2.5, 1.0); } },
+  };
+  Object.keys(SETS).forEach(k => { const op = document.createElement('option'); op.value = k; op.textContent = SETS[k].label; $('soundSet').appendChild(op); });
   const sounds = {
-    count: () => tone(880, 0, 0.12, 0.3),
-    work:  () => { tone(1320, 0, 0.18, 0.45, 'square'); tone(1320, 0.24, 0.35, 0.45, 'square'); },
-    rest:  () => tone(520, 0, 0.7, 0.45, 'triangle'),
-    prep:  () => tone(700, 0, 0.2, 0.3),
-    done:  () => { [523, 659, 784].forEach((f, i) => tone(f, i * 0.2, 0.25, 0.4, 'triangle')); tone(1047, 0.65, 1.2, 0.45, 'triangle'); },
+    count: () => SETS[settings.soundSet].count(),
+    work:  () => SETS[settings.soundSet].work(),
+    rest:  () => SETS[settings.soundSet].rest(),
+    prep:  () => SETS[settings.soundSet].count(),
+    done:  () => SETS[settings.soundSet].done(),
   };
 
   // ---------- タイマー本体 ----------
@@ -223,7 +293,7 @@
   function setUi() {
     $('startBtn').textContent = running ? '一時停止' : (started && idx < segs.length ? '再開' : '開始');
     $('skipBtn').disabled = !(started && idx < segs.length);
-    document.querySelectorAll('#settings input, #settings .step').forEach(e => e.disabled = started && idx < segs.length);
+    document.querySelectorAll('#settings input:not(.live), #settings .step').forEach(e => e.disabled = started && idx < segs.length);
   }
 
   function start() {
@@ -247,7 +317,9 @@
     const el = $(b.dataset.t); el.value = Number(el.value) + Number(b.dataset.d); onChange();
   });
   function onChange() { readSettings(); writeSettings(); updateTotal(); if (!started) render(); }
-  document.querySelectorAll('#settings input').forEach(e => e.addEventListener('change', onChange));
+  document.querySelectorAll('#settings input, #settings select').forEach(e => e.addEventListener('change', onChange));
+  $('volume').addEventListener('input', onChange);
+  document.querySelectorAll('.tests button').forEach(b => b.onclick = () => { ensureAudio(); sounds[b.dataset.ev](); });
 
   writeSettings(); readSettings(); updateTotal(); render(); setUi();
 })();
